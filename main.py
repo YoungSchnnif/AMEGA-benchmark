@@ -20,12 +20,7 @@ from litellm import completion
 from litellm.exceptions import BadRequestError as LiteLLM_BadRequestError, RateLimitError
 from together import Together
 
-#import vertexai
-#from vertexai.generative_models import GenerativeModel, GenerationConfig
 
-from google import genai
-from google.api_core import retry
-from google.genai.errors import ClientError
 
 import torch
 from transformers import pipeline, set_seed, AutoConfig
@@ -43,7 +38,6 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 os.environ["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY")
 os.environ["TOGETHERAI_API_KEY"] = os.getenv("TOGETHERAI_API_KEY")
 os.environ["OPENROUTER_API_KEY"] = os.getenv("OPENROUTER_API_KEY")
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "vertex-credentials-amega.json"
 
 class GeneratorModel:
     def __init__(self, model_name_or_path, generator_type, system_prompt=None):
@@ -57,8 +51,6 @@ class GeneratorModel:
         self.temperature = 0.0 #1e-5
         self.max_new_tokens = 4196
         self.max_context_window = 32000
-
-        self.vertexai_history = []
 
         if self.generator_type == 'openai':
             self.client = OpenAI(api_key=openai.api_key)
@@ -91,11 +83,11 @@ class GeneratorModel:
 
         if self.generator_type == 'local':
             set_seed(self.seed)
-            self.text_generation_pipeline = pipeline('text-generation',
+            self.text_gen_pipeline = pipeline('text-generation',
                                     model=model_name_or_path,
                                     device=device
                                     )
-            self.tokenizer = self.text_generation_pipeline.tokenizer
+            self.tokenizer = self.text_gen_pipeline.tokenizer
 
             self.model_config = AutoConfig.from_pretrained(model_name_or_path)
             self.max_context_window = self.model_config.max_position_embeddings
@@ -171,75 +163,6 @@ class GeneratorModel:
             output_str = response.choices[0].message.content
             # self.add_assistant_response(output_str)
 
-        elif self.generator_type == 'vertexai':
-
-            def send_message_with_retries(chat, generator_prompt, max_retries=5, delay=10):
-                attempt = 0
-                while attempt < max_retries:
-                    try:
-                        response = chat.send_message(generator_prompt)
-                        return response
-                    except ClientError as e:
-                        if e.code == 429:
-                            if attempt < max_retries - 1:
-                                print(f"429 error encountered. Retrying in {delay} seconds...")
-                                time.sleep(delay)
-                            attempt += 1
-                        else:
-                            raise e
-                raise Exception("Maximum retry attempts exceeded.")
-            
-            def supports_thinking(model_name: str, client: genai.Client) -> bool:
-                try:
-                    chat = client.chats.create(
-                        # model="gemini-1.5-flash-002",
-                        model=model_name, # 'gemini-2.0-flash-thinking-exp-01-21',
-                        config={"thinking_config": {"include_thoughts": False},
-                                        "max_output_tokens": 1}
-                    )
-                    test_response = chat.send_message("ping")
-                    return True
-                except ClientError as e:
-                    if e.code == 400 and "thinking_config" in str(e):
-                        # Unrecognised field => model does not support thinking
-                        return False
-                    raise          # surface all other errors (quota, auth, etc.)
-
-            # Load the JSON file
-            with open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"], 'r') as file:
-                vertex_credentials = json.load(file)
-
-            self.client = genai.Client(
-                vertexai=True,
-                project=vertex_credentials['project_id'],
-                location='us-central1'
-                        )
-            
-            config = {'temperature':self.temperature,
-                      }
-
-            if supports_thinking(self.model_name_or_path, self.client):
-                config["thinking_config"] = {"include_thoughts": True}
-
-            # Create a chat session
-            chat = self.client.chats.create(
-                model=self.model_name_or_path,
-                config=config
-            )
-            chat._curated_history += self.vertexai_history
-
-            # Send a message to the model
-            response = send_message_with_retries(chat, generator_prompt)
-
-            output_str = ''
-            for part in chat._curated_history[-1].parts:
-                if part.thought:
-                    output_str += f"### Thinking Process:\n{part.text}\n\n### Final Response:\n"
-                else:
-                    output_str += f"{part.text}\n"
-
-            self.vertexai_history = chat._curated_history
-
         elif self.generator_type == 'litellm':
 
             def get_reponse():
@@ -294,34 +217,14 @@ class GeneratorModel:
 
         return output_str
 
-    def build_chat_prompt(self):
-        """Convert the current message history to a chat prompt string."""
-        if not hasattr(self.tokenizer, 'apply_chat_template') or self.tokenizer.chat_template is None:
-            raise ValueError(
-                f"The tokenizer for '{self.model_name_or_path}' does not have a chat template. "
-                "Please use a model whose tokenizer defines a chat template."
-            )
-        return self.tokenizer.apply_chat_template(
-            self.messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-
     def generate_with_local_model(self, prompt):
-        # Generate a response using the text-generation pipeline with full chat history
-        chat_prompt = self.build_chat_prompt()
-
-        response = self.text_generation_pipeline(chat_prompt,
-                                                 do_sample=True,
-                                                 temperature=self.temperature,
-                                                 max_new_tokens=self.max_new_tokens,
-                                                 return_full_text=False)
-
-        if not response:
-            raise RuntimeError("The text-generation pipeline returned an empty response.")
-
-        # Extract the generated response
-        return response[0]['generated_text']
+        response = self.text_gen_pipeline(
+            self.messages,
+            do_sample=True,
+            temperature=self.temperature,
+            max_new_tokens=self.max_new_tokens,
+        )
+        return response[0]['generated_text'][-1]['content']
 
     def add_system_prompt(self, prompt):
         if prompt:
@@ -342,7 +245,7 @@ class GeneratorModel:
     def reset_memory(self):
         self.messages = []
         self.generated_responses = []
-        
+
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.total_tokens = 0
@@ -350,7 +253,6 @@ class GeneratorModel:
     def reset_messages(self):
         print('Memory full --> Messages resetted!')
         self.messages = []
-        self.vertexai_history = []
 
     def count_tokens(self, text):
         if self.generator_type == 'openai':
@@ -489,48 +391,6 @@ class EvaluatorModel:
                 boolean_list = [self.extract_booleans(choice.message.content) for choice in response.choices]# if len(self.extract_booleans(choice.message.content)) == len(criteria_list)]
                 
                 time.sleep(2)
-
-            ### Vertex AI evaluation added. ---------------------
-
-            elif self.evaluator_type == 'vertexai':
-                model = GenerativeModel(self.model)
-
-                result = model.generate_content(
-                    contents=evaluator_prompt,
-                    generation_config=GenerationConfig(
-                        candidate_count=self.n_eval,
-                        response_mime_type="application/json",
-                        response_schema={
-                            "type": "array",
-                            "items": {
-                                "type": "boolean"
-                            }
-                        }
-                    )
-                )
-
-                time.sleep(0.1) # to avoid rate limit errors
-
-                # TODO: update prompt_tokens, completion_tokens, total_tokens
-                
-                # print(f'Criteria List Length: {len(criteria_list)}')
-                # # print(criteria_json)
-                # for candidate in result.candidates:
-                #     # print(candidate)
-                #     # print(candidate.content)
-                #     # print(candidate.finish_reason)
-                #     print(candidate.keys())
-                # print('\n')
-
-                # print(result.candidates)
-
-                boolean_list = [self.extract_booleans(candidate.content.parts[0].text) for candidate in result.candidates if candidate.finish_reason == 1] # consider only candidates with FinishReason.STOP: 1
-
-                # waiting_time = 5
-                # print(f'Request was rejected due to token rate limiting. Waiting {waiting_time} seconds.')
-                # time.sleep(waiting_time)
-
-            ### Vertex AI evaluation added. ---------------------
 
             if not boolean_list:  # No valid evaluations
                 print('No valid evaluations! Repeat...')
@@ -1017,13 +877,13 @@ def main():
     parser.add_argument('--generator_model_name_or_path', type=str,
                         help='Path or name of the generator model')
     parser.add_argument('--generator_type', type=str,
-                        choices=['openai', 'vertexai', 'litellm', 'openrouter', 'local'],
+                        choices=['openai', 'litellm', 'openrouter', 'local'],
                         help='Generator type: openai, litellm, openrouter or local')
     parser.add_argument('--evaluator_model_name_or_path', type=str,
                         help='Path or name of the evaluator model')
     parser.add_argument('--evaluator_type', type=str, default='openai',
-                        choices=['openai', 'vertexai', 'openrouter'],
-                        help='Evaluator type: openai, vertexai or openrouter (default: openai)')
+                        choices=['openai', 'openrouter'],
+                        help='Evaluator type: openai or openrouter (default: openai)')
     parser.add_argument('--n_eval', type=int, default=11,
                         help='Number of evaluation attemps per run (default: 11)')
     parser.add_argument('--case_id', type=str, required=True,
@@ -1064,10 +924,6 @@ def main():
         evaluator_type = args.evaluator_type
         n_eval = args.n_eval
         k_eval = args.k_eval
-
-        if (evaluator_type == 'vertexai') & (n_eval > 8):
-            print(f'VERTEXAI: n_eval = {n_eval} but must be in the range [1, 8] --> set to 7')
-            n_eval = 7
 
         parameter_list.append(['Evaluator Model', evaluator_model_name_or_path])
         parameter_list.append(['Evaluator Type', evaluator_type])
