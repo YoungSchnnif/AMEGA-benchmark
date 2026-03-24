@@ -28,7 +28,7 @@ from google.api_core import retry
 from google.genai.errors import ClientError
 
 import torch
-from transformers import pipeline, Conversation, set_seed, AutoConfig
+from transformers import pipeline, set_seed, AutoConfig
 
 torch.cuda.empty_cache()
 
@@ -91,12 +91,11 @@ class GeneratorModel:
 
         if self.generator_type == 'local':
             set_seed(self.seed)
-            self.conversation = Conversation()
-            self.conversational_pipeline = pipeline('conversational',
+            self.text_generation_pipeline = pipeline('text-generation',
                                     model=model_name_or_path,
                                     device=device
                                     )
-            self.tokenizer = self.conversational_pipeline.tokenizer
+            self.tokenizer = self.text_generation_pipeline.tokenizer
 
             self.model_config = AutoConfig.from_pretrained(model_name_or_path)
             self.max_context_window = self.model_config.max_position_embeddings
@@ -295,18 +294,34 @@ class GeneratorModel:
 
         return output_str
 
-    def generate_with_local_model(self, prompt):
-        # Create a conversational pipeline using a specified model
-        self.conversation.add_user_input(prompt)
+    def build_chat_prompt(self):
+        """Convert the current message history to a chat prompt string."""
+        if not hasattr(self.tokenizer, 'apply_chat_template') or self.tokenizer.chat_template is None:
+            raise ValueError(
+                f"The tokenizer for '{self.model_name_or_path}' does not have a chat template. "
+                "Please use a model whose tokenizer defines a chat template."
+            )
+        return self.tokenizer.apply_chat_template(
+            self.messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
 
-        # Generate a response using the conversational pipeline
-        response = self.conversational_pipeline(self.conversation,
-                                                    do_sample=True,
-                                                    temperature=self.temperature,
-                                                    max_new_tokens=self.max_new_tokens)
+    def generate_with_local_model(self, prompt):
+        # Generate a response using the text-generation pipeline with full chat history
+        chat_prompt = self.build_chat_prompt()
+
+        response = self.text_generation_pipeline(chat_prompt,
+                                                 do_sample=True,
+                                                 temperature=self.temperature,
+                                                 max_new_tokens=self.max_new_tokens,
+                                                 return_full_text=False)
+
+        if not response:
+            raise RuntimeError("The text-generation pipeline returned an empty response.")
 
         # Extract the generated response
-        return response.generated_responses[-1]
+        return response[0]['generated_text']
 
     def add_system_prompt(self, prompt):
         if prompt:
@@ -327,9 +342,6 @@ class GeneratorModel:
     def reset_memory(self):
         self.messages = []
         self.generated_responses = []
-
-        if self.generator_type == 'local':
-            self.conversation.messages = []
         
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -339,13 +351,6 @@ class GeneratorModel:
         print('Memory full --> Messages resetted!')
         self.messages = []
         self.vertexai_history = []
-        # self.add_system_prompt(self.system_prompt)
-        # self.add_user_input(f'Initial Case: {self.case_str}\n')
-
-        if self.generator_type == 'local':
-            self.conversation.messages = []
-            # self.add_system_prompt(self.system_prompt)
-            # self.add_user_input(f'Initial Case: {self.case_str}\n')
 
     def count_tokens(self, text):
         if self.generator_type == 'openai':
