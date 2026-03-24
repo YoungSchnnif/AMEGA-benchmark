@@ -20,8 +20,8 @@ from litellm import completion
 from litellm.exceptions import BadRequestError as LiteLLM_BadRequestError, RateLimitError
 from together import Together
 
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+#import vertexai
+#from vertexai.generative_models import GenerativeModel, GenerationConfig
 
 from google import genai
 from google.api_core import retry
