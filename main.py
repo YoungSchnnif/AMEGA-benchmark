@@ -28,7 +28,7 @@ from google.api_core import retry
 from google.genai.errors import ClientError
 
 import torch
-from transformers import pipeline, Conversation, set_seed, AutoConfig
+from transformers import pipeline, set_seed, AutoConfig
 
 torch.cuda.empty_cache()
 
@@ -91,12 +91,11 @@ class GeneratorModel:
 
         if self.generator_type == 'local':
             set_seed(self.seed)
-            self.conversation = Conversation()
-            self.conversational_pipeline = pipeline('conversational',
+            self.text_gen_pipeline = pipeline('text-generation',
                                     model=model_name_or_path,
                                     device=device
                                     )
-            self.tokenizer = self.conversational_pipeline.tokenizer
+            self.tokenizer = self.text_gen_pipeline.tokenizer
 
             self.model_config = AutoConfig.from_pretrained(model_name_or_path)
             self.max_context_window = self.model_config.max_position_embeddings
@@ -296,17 +295,13 @@ class GeneratorModel:
         return output_str
 
     def generate_with_local_model(self, prompt):
-        # Create a conversational pipeline using a specified model
-        self.conversation.add_user_input(prompt)
-
-        # Generate a response using the conversational pipeline
-        response = self.conversational_pipeline(self.conversation,
-                                                    do_sample=True,
-                                                    temperature=self.temperature,
-                                                    max_new_tokens=self.max_new_tokens)
-
-        # Extract the generated response
-        return response.generated_responses[-1]
+        response = self.text_gen_pipeline(
+            self.messages,
+            do_sample=True,
+            temperature=self.temperature,
+            max_new_tokens=self.max_new_tokens,
+        )
+        return response[0]['generated_text'][-1]['content']
 
     def add_system_prompt(self, prompt):
         if prompt:
@@ -328,9 +323,6 @@ class GeneratorModel:
         self.messages = []
         self.generated_responses = []
 
-        if self.generator_type == 'local':
-            self.conversation.messages = []
-        
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.total_tokens = 0
@@ -342,10 +334,6 @@ class GeneratorModel:
         # self.add_system_prompt(self.system_prompt)
         # self.add_user_input(f'Initial Case: {self.case_str}\n')
 
-        if self.generator_type == 'local':
-            self.conversation.messages = []
-            # self.add_system_prompt(self.system_prompt)
-            # self.add_user_input(f'Initial Case: {self.case_str}\n')
 
     def count_tokens(self, text):
         if self.generator_type == 'openai':
