@@ -220,7 +220,7 @@ class GeneratorModel:
     def generate_with_local_model(self, prompt):
         response = self.text_gen_pipeline(
             self.messages,
-            do_sample=True,
+            do_sample=False,
             temperature=self.temperature,
             max_new_tokens=self.max_new_tokens,
         )
