@@ -331,9 +331,6 @@ class GeneratorModel:
         print('Memory full --> Messages resetted!')
         self.messages = []
         self.vertexai_history = []
-        # self.add_system_prompt(self.system_prompt)
-        # self.add_user_input(f'Initial Case: {self.case_str}\n')
-
 
     def count_tokens(self, text):
         if self.generator_type == 'openai':
