@@ -63,12 +63,12 @@ python main.py \
     --data_dir $DATA_DIR \
     --generator_model_name_or_path $MODEL_PATH \
     --generator_type local \
-    --evaluator_model_name_or_path gpt-4-turbo-2024-04-09 \
-    --evaluator_type openai \
     --case_id 1 \
     --output_dir $OUTPUT_DIR \
     --benchmark_mode generate \
-    --n_eval 1
+
+
+
 
 echo "========================================"
 echo "AMEGA benchmark complete!"
