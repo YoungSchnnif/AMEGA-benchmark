@@ -533,6 +533,41 @@ class Benchmark:
 
         return response, reask_responses
 
+def smart_reset_messages(generator_model, case_id, case_str, keep_last_n_pairs=2):
+    """
+    Reset aber behalte:
+    1. System Prompt (falls vorhanden)
+    2. Initial Case (falls noch relevant)
+    3. Letzte N Question/Answer Pairs
+    """
+    
+    current_tokens = generator_model.num_tokens_from_messages()
+    max_safe_tokens = 15000  # Bleibe unter 20k
+    
+    if current_tokens > max_safe_tokens:
+        
+        # Extrahiere wichtige Messages
+        messages = generator_model.messages
+        new_messages = []
+        
+        # 1. Behalte System Prompt (Index 0, falls vorhanden)
+        if messages and messages[0].get('role') == 'system':
+            new_messages.append(messages[0])
+        
+        # 2. Behalte letzte N Question/Answer Pairs
+        # (Question = "role": "user", Answer = "role": "assistant")
+        qa_pairs = []
+        for msg in messages:
+            if msg.get('role') == 'user' or msg.get('role') == 'assistant':
+                qa_pairs.append(msg)
+        
+        # Behalte nur die letzten 2 Pairs (= 4 Messages)
+        new_messages.extend(qa_pairs[-4:])
+        
+        # 3. Setze neuen Memory
+        generator_model.messages = new_messages
+        
+
     def generate_responses(self, generator_model, case_id):
         response_dict_list = []
         reask_response_dict_list = []
@@ -556,6 +591,13 @@ class Benchmark:
 
             response_dict_list.append(response)
             reask_response_dict_list.extend(reask_responses)
+            if current_tokens > 15000:  
+                smart_reset_messages(
+                 generator_model,
+                 case_id,
+                 case_str,
+                    keep_last_n_pairs=2  # ← Behalte letzte 2 Q/A Pairs!
+                )
 
         return response_dict_list, reask_response_dict_list
 
