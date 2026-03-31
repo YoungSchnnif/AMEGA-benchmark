@@ -27,7 +27,7 @@ from transformers import pipeline, set_seed, AutoConfig
 
 torch.cuda.empty_cache()
 
-device = torch.device('cuda')
+#device = torch.device('cuda')
 
 load_dotenv()  # take environment variables from .env.
 
