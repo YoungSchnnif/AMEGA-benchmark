@@ -27,7 +27,7 @@ from transformers import pipeline, set_seed, AutoConfig
 
 torch.cuda.empty_cache()
 
-device = torch.device('cuda:0')
+device = torch.device('cuda')
 
 load_dotenv()  # take environment variables from .env.
 
@@ -83,10 +83,11 @@ class GeneratorModel:
 
         if self.generator_type == 'local':
             set_seed(self.seed)
-            self.text_gen_pipeline = pipeline('text-generation',
-                                    model=model_name_or_path,
-                                    device=device
-                                    )
+            self.text_gen_pipeline = pipeline(
+                'text-generation',
+                model=model_name_or_path,
+                device_map='auto'  
+                )
             self.tokenizer = self.text_gen_pipeline.tokenizer
 
             self.model_config = AutoConfig.from_pretrained(model_name_or_path)

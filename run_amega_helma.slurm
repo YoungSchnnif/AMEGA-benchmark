@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=06:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=logs/amega/log_%j.log
 #SBATCH --error=logs/amega/log_%j.err
  
@@ -32,7 +32,7 @@ OUTPUT_DIR="$PROJECT_DIR/output"
 # ==== ENVIRONMENT VARIABLES ====
 export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=${SLURM_GPUS}
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ==== CREATE DIRECTORIES ====
