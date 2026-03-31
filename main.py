@@ -222,7 +222,6 @@ class GeneratorModel:
         response = self.text_gen_pipeline(
             self.messages,
             do_sample=False,
-            temperature=self.temperature,
             max_new_tokens=self.max_new_tokens,
         )
         return response[0]['generated_text'][-1]['content']
